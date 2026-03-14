@@ -19,14 +19,27 @@ function jsonResponse(body, status = 200) {
     return new Response(JSON.stringify(body), { status, headers: corsHeaders() });
 }
 
+function resolveEnv(env) {
+    return {
+        SUPABASE_URL: env.SUPABASE_URL || env.VITE_SUPABASE_URL,
+        SUPABASE_SERVICE_ROLE_KEY: env.SUPABASE_SERVICE_ROLE_KEY,
+        SUPABASE_ANON_KEY: env.SUPABASE_ANON_KEY || env.VITE_SUPABASE_ANON_KEY,
+        R2_ACCESS_KEY_ID: env.R2_ACCESS_KEY_ID,
+        R2_SECRET_ACCESS_KEY: env.R2_SECRET_ACCESS_KEY,
+        R2_ENDPOINT: env.R2_ENDPOINT,
+        R2_BUCKET_NAME: env.R2_BUCKET_NAME,
+    };
+}
+
 async function verifyAuth(env, authHeader) {
     if (!authHeader || !authHeader.startsWith('Bearer ')) return null;
     const token = authHeader.replace('Bearer ', '');
+    const resolved = resolveEnv(env);
 
     // 1. Get user from Supabase Auth
-    const userRes = await fetch(`${env.SUPABASE_URL}/auth/v1/user`, {
+    const userRes = await fetch(`${resolved.SUPABASE_URL}/auth/v1/user`, {
         headers: {
-            apikey: env.SUPABASE_ANON_KEY || env.SUPABASE_SERVICE_ROLE_KEY,
+            apikey: resolved.SUPABASE_ANON_KEY || resolved.SUPABASE_SERVICE_ROLE_KEY,
             Authorization: `Bearer ${token}`,
         },
     });
@@ -35,11 +48,11 @@ async function verifyAuth(env, authHeader) {
     const user = await userRes.json();
 
     // 2. Try to get profile (for Admin/Tenant users)
-    const profileUrl = `${env.SUPABASE_URL}/rest/v1/user_profiles?id=eq.${user.id}&select=tenant_id,role`;
+    const profileUrl = `${resolved.SUPABASE_URL}/rest/v1/user_profiles?id=eq.${user.id}&select=tenant_id,role`;
     const profileRes = await fetch(profileUrl, {
         headers: {
-            apikey: env.SUPABASE_SERVICE_ROLE_KEY,
-            Authorization: `Bearer ${env.SUPABASE_SERVICE_ROLE_KEY}`,
+            apikey: resolved.SUPABASE_SERVICE_ROLE_KEY,
+            Authorization: `Bearer ${resolved.SUPABASE_SERVICE_ROLE_KEY}`,
         },
     });
 
@@ -67,7 +80,14 @@ export async function onRequestPost(context) {
     const { request, env } = context;
 
     try {
-        const { SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_ENDPOINT, R2_BUCKET_NAME } = env;
+        const resolved = resolveEnv(env);
+        const { SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_ENDPOINT, R2_BUCKET_NAME } = resolved;
+
+        // Validate critical env vars
+        if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
+            console.error('[signed-upload-url] Missing env vars. SUPABASE_URL:', !!SUPABASE_URL, 'SUPABASE_SERVICE_ROLE_KEY:', !!SUPABASE_SERVICE_ROLE_KEY);
+            return jsonResponse({ success: false, error: 'Server misconfiguration: missing database credentials.' }, 500);
+        }
 
         // 1. Auth check (Optional for public guest mode)
         const authHeader = request.headers.get('Authorization');

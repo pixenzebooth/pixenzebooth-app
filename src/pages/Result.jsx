@@ -138,13 +138,24 @@ const Result = () => {
         setUploading(true);
         try {
             setUploadStatus('Processing photo strip...');
-            const blob = await blobUrlToBlob(stripUrl);
+            let blob;
+            try {
+                blob = await blobUrlToBlob(stripUrl);
+            } catch (blobErr) {
+                throw new Error(`Failed to process photo: ${blobErr.message}`);
+            }
             
-            setUploadStatus('Uploading to Cloudflare R2...');
-            const result = await uploadPhoto(activeEventId, blob, `strip_${Date.now()}.jpg`, null, (s) => setUploadStatus(s));
+            setUploadStatus('Uploading to cloud storage...');
+            let result;
+            try {
+                result = await uploadPhoto(activeEventId, blob, `strip_${Date.now()}.jpg`, null, (s) => setUploadStatus(s));
+            } catch (uploadErr) {
+                console.error('[Result] Upload failed with details:', uploadErr);
+                throw new Error(`Upload failed: ${uploadErr.message}`);
+            }
 
             if (!result.photo_url) {
-                throw new Error("Upload failed, no URL returned.");
+                throw new Error("Upload completed but no URL returned. Check server logs.");
             }
 
             localStorage.setItem('last_r2_upload', Date.now());
