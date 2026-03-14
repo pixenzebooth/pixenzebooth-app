@@ -61,11 +61,18 @@ const LicenseGate = ({ children }) => {
   const { hasActiveEvent } = useEvent();
   const location = useLocation();
 
-  const isPublicRoute = location.pathname.startsWith('/share') || 
-                        location.pathname.startsWith('/gallery') ||
-                        location.pathname === '/privacy' ||
-                        location.pathname === '/about' ||
-                        location.pathname === '/contact';
+  // Check if current route is public (Share page, Gallery, etc.)
+  // We check both location.pathname (router state) AND window.location.hash (physical URL)
+  // to ensure robust detection even during initial load/sync.
+  const checkPublic = (path) => {
+    const publicPaths = ['/share', '/gallery', '/privacy', '/about', '/contact'];
+    return publicPaths.some(p => path.startsWith(p));
+  };
+
+  const isPublicRoute = checkPublic(location.pathname) || 
+                        checkPublic(window.location.hash.replace('#', '')) ||
+                        window.location.href.includes('/share') ||
+                        window.location.href.includes('/gallery');
 
   // Redirect preview domain root to main app domain
   useEffect(() => {
