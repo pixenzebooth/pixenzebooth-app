@@ -16,23 +16,69 @@ const PhotoShare = () => {
         let extractedUrl = '';
         try {
             const currentHref = window.location.href;
+            console.log(`[PhotoShare] Full href: ${currentHref}`);
+            
             if (currentHref.includes('?img=')) {
                 // Extract everything after ?img=
                 const rawParam = currentHref.split('?img=')[1];
-                // In case there are other fragments, take up to the next & or #
-                const beforeAmp = rawParam.split('&')[0];
+                // In case there are other params after img, split by & only
+                // But be careful not to split on & that's part of the encoded URL
+                const beforeAmp = rawParam ? rawParam.split('&')[0] : '';
                 extractedUrl = decodeURIComponent(beforeAmp);
+                console.log(`[PhotoShare] Extracted URL: ${extractedUrl}`);
+            }
+            
+            // Also try React Router's search params as fallback
+            if (!extractedUrl) {
+                const searchParams = new URLSearchParams(location.search);
+                const imgParam = searchParams.get('img');
+                if (imgParam) {
+                    extractedUrl = imgParam;
+                    console.log(`[PhotoShare] Extracted URL from searchParams: ${extractedUrl}`);
+                }
             }
         } catch (e) {
-            console.error(e);
+            console.error('[PhotoShare] URL extraction error:', e);
         }
 
+        // Validate URL looks like a proper image URL
         if (extractedUrl) {
+            if (!extractedUrl.startsWith('http')) {
+                console.error(`[PhotoShare] Invalid URL (not http): ${extractedUrl}`);
+                setImageError(true);
+            }
             setImageUrl(extractedUrl);
         } else {
+            console.warn('[PhotoShare] No image URL found, redirecting to home');
             navigate('/');
         }
     }, [location, navigate]);
+
+    const fetchWithRetry = async (url, retries = 3, delay = 2000) => {
+        for (let i = 0; i < retries; i++) {
+            try {
+                const res = await fetch(url, {
+                    mode: 'cors',
+                    credentials: 'omit'
+                });
+                
+                if (res.ok) return res;
+                
+                // If 404, the file might not have propagated yet in R2
+                if (res.status === 404 && i < retries - 1) {
+                    console.log(`[PhotoShare] Got 404, retrying in ${delay}ms... (attempt ${i + 1}/${retries})`);
+                    await new Promise(r => setTimeout(r, delay));
+                    continue;
+                }
+                
+                throw new Error(`HTTP error! status: ${res.status}`);
+            } catch (err) {
+                if (i === retries - 1) throw err;
+                console.log(`[PhotoShare] Fetch error, retrying in ${delay}ms... (attempt ${i + 1}/${retries})`);
+                await new Promise(r => setTimeout(r, delay));
+            }
+        }
+    };
 
     const handleDownload = async () => {
         if (isDownloading) return;
@@ -40,15 +86,7 @@ const PhotoShare = () => {
         console.log(`[PhotoShare] Starting download for: ${imageUrl}`);
         
         try {
-            const res = await fetch(imageUrl, {
-                mode: 'cors', // Explicitly request CORS
-                credentials: 'omit' // R2 public links usually don't need credentials
-            });
-            
-            if (!res.ok) {
-                console.error(`[PhotoShare] Fetch failed with status ${res.status}: ${res.statusText}`);
-                throw new Error(`HTTP error! status: ${res.status}`);
-            }
+            const res = await fetchWithRetry(imageUrl);
             
             const blob = await res.blob();
             console.log(`[PhotoShare] Blob received: type=${blob.type}, size=${blob.size}`);
