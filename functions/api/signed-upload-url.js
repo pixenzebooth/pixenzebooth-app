@@ -140,10 +140,17 @@ export async function onRequestPost(context) {
             return jsonResponse({ success: false, error: 'Could not resolve tenant for this upload.' }, 400);
         }
 
-        // 4. Generate file path: photos/{tenant_id}/{event_id}/{photo_id}.ext
+        // 4. Generate file path: photos/{tenant_id}/{event_id}/{filename}_{short_id}.ext
         const photoId = crypto.randomUUID();
         const ext = filename.includes('.') ? filename.split('.').pop().toLowerCase() : 'jpg';
-        const filePath = `photos/${tenantId}/${event_id}/${photoId}.${ext}`;
+        let baseName = filename.includes('.') ? filename.substring(0, filename.lastIndexOf('.')) : filename;
+        
+        // Sanitize baseName: keep alphanumeric, dashes, and underscores
+        baseName = baseName.replace(/[^a-z0-9_-]/gi, '_').substring(0, 50);
+        
+        // Use a part of the UUID to ensure uniqueness while keeping the filename readable
+        const shortId = photoId.split('-')[0]; // first 8 chars
+        const filePath = `photos/${tenantId}/${event_id}/${baseName}_${shortId}.${ext}`;
 
         // 5. Generate R2 Signed URL if configured
         if (R2_ACCESS_KEY_ID && R2_SECRET_ACCESS_KEY && R2_ENDPOINT && R2_BUCKET_NAME) {

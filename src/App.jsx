@@ -1,7 +1,7 @@
 import React, { Suspense, lazy, useEffect } from 'react';
 import * as Sentry from '@sentry/react';
 import { HelmetProvider } from 'react-helmet-async';
-import { HashRouter as Router, Routes, Route } from 'react-router-dom';
+import { HashRouter as Router, Routes, Route, useLocation } from 'react-router-dom';
 import { AuthProvider } from './hooks/useAuth';
 import { AlertProvider } from './context/AlertContext';
 import { ThemeProvider } from './context/ThemeContext';
@@ -59,6 +59,25 @@ const PageLoader = () => (
 const LicenseGate = ({ children }) => {
   const { isLicensed, isValidating } = useLicense();
   const { hasActiveEvent } = useEvent();
+  const location = useLocation();
+
+  const isPublicRoute = location.pathname.startsWith('/share') || 
+                        location.pathname.startsWith('/gallery') ||
+                        location.pathname === '/privacy' ||
+                        location.pathname === '/about' ||
+                        location.pathname === '/contact';
+
+  // Redirect preview domain root to main app domain
+  useEffect(() => {
+    if (window.location.hostname === 'preview.pixenzebooth.com' && location.pathname === '/') {
+      window.location.href = 'https://app.pixenzebooth.com';
+    }
+  }, [location]);
+
+  // If public route, skip license checks
+  if (isPublicRoute) {
+    return children;
+  }
 
   // Loading
   if (isValidating) {
@@ -153,9 +172,9 @@ function App() {
             <EventProvider>
               <ThemeProvider>
                 <Sentry.ErrorBoundary fallback={<ErrorFallback />}>
-                  <LicenseGate>
-                    <AuthProvider>
-                      <Router>
+                  <Router>
+                    <LicenseGate>
+                      <AuthProvider>
                         <a href="#main-content" className="skip-to-content">Skip to Main Content</a>
                         <main id="main-content" tabIndex="-1">
                           <Suspense fallback={<PageLoader />}>
@@ -178,9 +197,9 @@ function App() {
                             </Routes>
                           </Suspense>
                         </main>
-                      </Router>
-                    </AuthProvider>
-                  </LicenseGate>
+                      </AuthProvider>
+                    </LicenseGate>
+                  </Router>
                 </Sentry.ErrorBoundary>
               </ThemeProvider>
             </EventProvider>

@@ -145,10 +145,20 @@ const Result = () => {
                 throw new Error(`Failed to process photo: ${blobErr.message}`);
             }
             
+            // Generate a more readable filename: PIXENZE_YYYYMMDD_HHMMSS.jpg
+            const now = new Date();
+            const timestamp = now.getFullYear() + 
+                String(now.getMonth() + 1).padStart(2, '0') + 
+                String(now.getDate()).padStart(2, '0') + "_" + 
+                String(now.getHours()).padStart(2, '0') + 
+                String(now.getMinutes()).padStart(2, '0') + 
+                String(now.getSeconds()).padStart(2, '0');
+            const customFilename = `PIXENZE_${timestamp}.jpg`;
+            
             setUploadStatus('Uploading to cloud storage...');
             let result;
             try {
-                result = await uploadPhoto(activeEventId, blob, `strip_${Date.now()}.jpg`, null, (s) => setUploadStatus(s));
+                result = await uploadPhoto(activeEventId, blob, customFilename, null, (s) => setUploadStatus(s));
             } catch (uploadErr) {
                 console.error('[Result] Upload failed with details:', uploadErr);
                 throw new Error(`Upload failed: ${uploadErr.message}`);
@@ -173,13 +183,8 @@ const Result = () => {
                 }
             }
 
-            // Generate QR Code Share Link
-            // Note: We use window.location.origin if it's production-like, or fall back to the hardcoded domain
-            const currentOrigin = window.location.origin;
-            const productionDomain = currentOrigin.includes('pixenzebooth.com') ? currentOrigin : 'https://app.pixenzebooth.com';
-            
-            // Construction: Domain + /#/share?img=...
-            const shareUrl = `${productionDomain}/#/share?img=${encodeURIComponent(result.photo_url)}`;
+            // Construction: Domain + /#/share?id=... (Using preview domain to bypass license checks on main app)
+            const shareUrl = `https://preview.pixenzebooth.com/#/share?id=${result.photo_id}`;
             setQrUrl(shareUrl);
             console.log(`[Result] Generated Share URL: ${shareUrl}`);
             setShowQrModal(true);

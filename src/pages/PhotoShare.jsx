@@ -2,56 +2,77 @@ import React, { useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { Download, Camera, Home, ExternalLink, AlertCircle } from 'lucide-react';
 import { motion } from 'framer-motion';
+import { supabase } from '../lib/supabase';
 
 const PhotoShare = () => {
     const location = useLocation();
     const navigate = useNavigate();
     const [imageUrl, setImageUrl] = useState('');
+    const [photoMetadata, setPhotoMetadata] = useState(null);
     const [isDownloading, setIsDownloading] = useState(false);
     const [imageError, setImageError] = useState(false);
 
     useEffect(() => {
-        // Fallback for React Router HashRouter swallowing query params on some mobile devices
-        // We manually extract from window.location.href to be absolutely 100% safe
-        let extractedUrl = '';
-        try {
-            const currentHref = window.location.href;
-            console.log(`[PhotoShare] Full href: ${currentHref}`);
+        const extractParams = async () => {
+            let extractedUrl = '';
+            let photoRecord = null;
             
-            if (currentHref.includes('?img=')) {
-                // Extract everything after ?img=
-                const rawParam = currentHref.split('?img=')[1];
-                // In case there are other params after img, split by & only
-                // But be careful not to split on & that's part of the encoded URL
-                const beforeAmp = rawParam ? rawParam.split('&')[0] : '';
-                extractedUrl = decodeURIComponent(beforeAmp);
-                console.log(`[PhotoShare] Extracted URL: ${extractedUrl}`);
-            }
-            
-            // Also try React Router's search params as fallback
-            if (!extractedUrl) {
+            try {
                 const searchParams = new URLSearchParams(location.search);
+                const idParam = searchParams.get('id');
                 const imgParam = searchParams.get('img');
-                if (imgParam) {
-                    extractedUrl = imgParam;
-                    console.log(`[PhotoShare] Extracted URL from searchParams: ${extractedUrl}`);
-                }
-            }
-        } catch (e) {
-            console.error('[PhotoShare] URL extraction error:', e);
-        }
 
-        // Validate URL looks like a proper image URL
-        if (extractedUrl) {
-            if (!extractedUrl.startsWith('http')) {
-                console.error(`[PhotoShare] Invalid URL (not http): ${extractedUrl}`);
-                setImageError(true);
+                // 1. Try to fetch by ID (Optimized Short Link)
+                if (idParam && supabase) {
+                    console.log(`[PhotoShare] Fetching metadata for ID: ${idParam}`);
+                    const { data, error } = await supabase
+                        .from('photos')
+                        .select('photo_url, file_path')
+                        .eq('id', idParam)
+                        .single();
+                    
+                    if (!error && data) {
+                        extractedUrl = data.photo_url;
+                        photoRecord = data;
+                        console.log(`[PhotoShare] Found photo by ID: ${extractedUrl}`);
+                    } else if (error) {
+                        console.warn(`[PhotoShare] Supabase fetch error: ${error.message}`);
+                    }
+                }
+
+                // 2. Fallback to legacy img= param
+                if (!extractedUrl && imgParam) {
+                    extractedUrl = imgParam;
+                }
+
+                // 3. Last resort: manual parsing from href
+                if (!extractedUrl) {
+                    const currentHref = window.location.href;
+                    if (currentHref.includes('?img=')) {
+                        const rawParam = currentHref.split('?img=')[1];
+                        extractedUrl = decodeURIComponent(rawParam.split('&')[0]);
+                    } else if (currentHref.includes('?id=')) {
+                        // If we have ID but supabase failed, we can't do much without fetching
+                        console.error('[PhotoShare] ID found in URL but record not found/accessible.');
+                    }
+                }
+            } catch (e) {
+                console.error('[PhotoShare] Params extraction error:', e);
             }
-            setImageUrl(extractedUrl);
-        } else {
-            console.warn('[PhotoShare] No image URL found, redirecting to home');
-            navigate('/');
-        }
+
+            if (extractedUrl) {
+                setImageUrl(extractedUrl);
+                // Save record for better filename during download
+                if (photoRecord) {
+                    setPhotoMetadata(photoRecord);
+                }
+            } else {
+                console.warn('[PhotoShare] No image found, redirecting to home');
+                navigate('/');
+            }
+        };
+
+        extractParams();
     }, [location, navigate]);
 
     const fetchWithRetry = async (url, retries = 3, delay = 2000) => {
@@ -100,7 +121,15 @@ const PhotoShare = () => {
             const url = URL.createObjectURL(blob);
             const link = document.createElement('a');
             link.href = url;
-            link.download = `pixenzebooth-moment-${Date.now()}.jpg`;
+            
+            // Determine filename from metadata if available
+            let downloadName = `pixenzebooth-moment-${Date.now()}.jpg`;
+            if (photoMetadata?.file_path) {
+                const parts = photoMetadata.file_path.split('/');
+                downloadName = parts[parts.length - 1];
+            }
+            
+            link.download = downloadName;
             document.body.appendChild(link);
             link.click();
             document.body.removeChild(link);
