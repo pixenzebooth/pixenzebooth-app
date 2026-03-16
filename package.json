@@ -52,6 +52,7 @@
     "@aws-sdk/s3-request-presigner": "^3.1009.0",
     "@capacitor/android": "^7.0.0",
     "@capacitor/core": "^8.1.0",
+    "@emotion/is-prop-valid": "^1.4.0",
     "@sentry/react": "^10.38.0",
     "@supabase/supabase-js": "^2.93.2",
     "canvas-confetti": "^1.9.4",

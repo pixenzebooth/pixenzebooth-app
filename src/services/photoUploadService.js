@@ -33,7 +33,7 @@ async function getAccessToken() {
  * @param {string} contentType - MIME type (e.g., "image/jpeg")
  * @returns {{ photo_id, file_path, upload_url, method, upload_headers?, upload_token? }}
  */
-export async function requestSignedUploadUrl(eventId, filename, contentType = 'image/jpeg') {
+export async function requestSignedUploadUrl(eventId, filename, contentType = 'image/jpeg', tenantId = 'default', sessionId = null, tier = 'cold', category = 'gallery') {
     const token = await getAccessToken();
     
     const headers = {
@@ -47,7 +47,15 @@ export async function requestSignedUploadUrl(eventId, filename, contentType = 'i
     const res = await fetch(`${API_BASE}/api/signed-upload-url`, {
         method: 'POST',
         headers: headers,
-        body: JSON.stringify({ event_id: eventId, filename, content_type: contentType }),
+        body: JSON.stringify({ 
+            event_id: eventId, 
+            filename, 
+            content_type: contentType,
+            tenant_id: tenantId,
+            session_id: sessionId,
+            tier: tier,
+            category: category
+        }),
     });
 
     if (!res.ok) {
@@ -175,13 +183,17 @@ export async function confirmPhotoUpload(photoId, eventId, filePath, fileSize, s
  * @param {string} filename - Original filename
  * @param {Function} onProgress - Progress callback (0-100)
  * @param {Function} onStatus - Status text callback
+ * @param {string} tenantId - Tenant ID
+ * @param {string} sessionId - Session ID
+ * @param {string} tier - Storage tier ('hot' or 'cold')
+ * @param {string} category - Functional category ('gallery', 'assets', 'logs')
  * @returns {{ photo_url: string, photo_id: string }}
  */
-export async function uploadPhoto(eventId, photoBlob, filename = 'photo.jpg', onProgress = null, onStatus = null) {
+export async function uploadPhoto(eventId, photoBlob, filename = 'photo.jpg', onProgress = null, onStatus = null, tenantId = 'default', sessionId = null, tier = 'hot', category = 'gallery') {
     // Step 1: Get signed URL
     if (onStatus) onStatus('Requesting upload URL...');
     const contentType = photoBlob.type || 'image/jpeg';
-    const signedData = await requestSignedUploadUrl(eventId, filename, contentType);
+    const signedData = await requestSignedUploadUrl(eventId, filename, contentType, tenantId, sessionId, tier, category);
 
     // Step 2: Upload directly to Storage
     if (onStatus) onStatus('Uploading photo...');
@@ -259,4 +271,47 @@ export async function blobUrlToBlob(url) {
     }
     const res = await fetch(url);
     return await res.blob();
+}
+
+/**
+ * Uploads multiple Blobs/Files to predictable R2 paths relative to a primary photo ID.
+ * Used for storing GIF, Video, and Raw photos for the slider.
+ */
+export async function uploadMultipleToPredictablePaths(eventId, assets, onStatus = null, tenantId = 'default', sessionId = null, tier = 'cold', category = 'gallery') {
+    const results = [];
+    for (const asset of assets) {
+        try {
+            if (onStatus) onStatus(`Uploading ${asset.label}...`);
+            
+            // Step 1: Request signed URL with custom filename
+            const signedData = await requestSignedUploadUrl(eventId, asset.filename, asset.blob.type, tenantId, sessionId, tier, category);
+            
+            // Step 2: Upload to Storage
+            await uploadPhotoToStorage(
+                signedData.upload_url,
+                asset.blob,
+                asset.blob.type,
+                signedData.method || 'PUT',
+                signedData.upload_headers || null
+            );
+            
+            // Step 3: Confirm (So it's registered, though we might not use the ID directly)
+            const confirmed = await confirmPhotoUpload(
+                signedData.photo_id,
+                eventId,
+                signedData.file_path,
+                asset.blob.size,
+                signedData.storage_provider || 'supabase'
+            );
+            
+            results.push({
+                type: asset.type,
+                url: confirmed.photo.photo_url,
+                path: confirmed.photo.file_path
+            });
+        } catch (err) {
+            console.warn(`Failed to upload predictable asset ${asset.type}:`, err);
+        }
+    }
+    return results;
 }

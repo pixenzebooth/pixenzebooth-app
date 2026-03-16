@@ -6,7 +6,7 @@ import { RotateCcw, Star, X, Zap, FolderUp, User, Mail } from 'lucide-react';
 import { QRCodeCanvas } from 'qrcode.react';
 import { useAuth } from '../hooks/useAuth';
 import { supabase } from '../lib/supabase';
-import { uploadPhoto, blobUrlToBlob, dataURItoBlob } from '../services/photoUploadService';
+import { uploadPhoto, blobUrlToBlob, dataURItoBlob, uploadMultipleToPredictablePaths } from '../services/photoUploadService';
 import { checkCampaignStatus, submitWinner } from '../services/campaignService';
 import { useReducedMotion } from '../hooks/useReducedMotion';
 import { useTenant } from '../context/TenantContext';
@@ -46,7 +46,7 @@ const Result = () => {
     const [downloadingVideo, setDownloadingVideo] = useState(false);
     const [liveVideoUrls, setLiveVideoUrls] = useState([]);
     const [showConfirmRetake, setShowConfirmRetake] = useState(false);
-    const hiddenVideosRef = useRef({}); // Store refs for video elements by index
+    const [mountedVideos, setMountedVideos] = useState({}); // Stores video elements by index
 
     useEffect(() => {
         if (state?.photos) {
@@ -61,9 +61,21 @@ const Result = () => {
             };
             generate();
         } else {
+            console.warn("[Result] No photos in state, redirecting...");
             navigate('/');
         }
     }, [state, navigate]);
+
+    // Populate Live Video URLs
+    useEffect(() => {
+        if (state?.liveVideos && state.liveVideos.some(v => v)) {
+            const urls = state.liveVideos.map(blob => blob ? URL.createObjectURL(blob) : null);
+            setLiveVideoUrls(urls);
+            return () => {
+                urls.forEach(url => url && URL.revokeObjectURL(url));
+            };
+        }
+    }, [state?.liveVideos]);
 
     const [isCampaignActive, setIsCampaignActive] = useState(false);
     const [campaignRemaining, setCampaignRemaining] = useState(0);
@@ -137,7 +149,7 @@ const Result = () => {
 
         setUploading(true);
         try {
-            setUploadStatus('Processing photo strip...');
+            setUploadStatus('Processing primary strip...');
             let blob;
             try {
                 blob = await blobUrlToBlob(stripUrl);
@@ -145,27 +157,66 @@ const Result = () => {
                 throw new Error(`Failed to process photo: ${blobErr.message}`);
             }
             
-            // Generate a more readable filename: PIXENZE_YYYYMMDD_HHMMSS.jpg
-            const now = new Date();
-            const timestamp = now.getFullYear() + 
-                String(now.getMonth() + 1).padStart(2, '0') + 
-                String(now.getDate()).padStart(2, '0') + "_" + 
-                String(now.getHours()).padStart(2, '0') + 
-                String(now.getMinutes()).padStart(2, '0') + 
-                String(now.getSeconds()).padStart(2, '0');
-            const customFilename = `PIXENZE_${timestamp}.jpg`;
+            // Base unique identifier for this session's assets
+            const photoId = crypto.randomUUID();
+            const mainFilename = `${photoId}.jpg`;
+            const tenantId = state.config?.tenant_id || 'default';
+            const sessionId = photoId;
             
-            setUploadStatus('Uploading to cloud storage...');
-            let result;
-            try {
-                result = await uploadPhoto(activeEventId, blob, customFilename, null, (s) => setUploadStatus(s));
-            } catch (uploadErr) {
-                console.error('[Result] Upload failed with details:', uploadErr);
-                throw new Error(`Upload failed: ${uploadErr.message}`);
+            setUploadStatus('Uploading primary strip...');
+            const result = await uploadPhoto(activeEventId, blob, mainFilename, null, (s) => setUploadStatus(s), tenantId, sessionId);
+
+            if (!result.photo_url || !result.photo_id) {
+                throw new Error("Upload completed but invalid response. Check server logs.");
             }
 
-            if (!result.photo_url) {
-                throw new Error("Upload completed but no URL returned. Check server logs.");
+            // --- Extra Assets Upload ---
+            const extraAssets = [];
+            
+            // 1. Raw Photos
+            state.photos.forEach((photo, i) => {
+                extraAssets.push({
+                    type: 'raw',
+                    label: `Raw ${i+1}`,
+                    filename: `${photoId}_raw_${i}.jpg`,
+                    blob: dataURItoBlob(photo)
+                });
+            });
+
+            // 2. GIF and Video (if live)
+            if (state.liveVideos && state.liveVideos.some(v => v)) {
+                setUploadStatus('Generating GIF...');
+                try {
+                    const gifBlob = await createLiveStripGif(liveVideoUrls, state.photos, state.config);
+                    extraAssets.push({
+                        type: 'gif',
+                        label: 'Animation',
+                        filename: `${photoId}.gif`,
+                        blob: gifBlob
+                    });
+                } catch (gifErr) {
+                    console.warn("GIF generation failed:", gifErr);
+                }
+
+                setUploadStatus('Generating Video...');
+                try {
+                    const videoBlob = await recordStripVideo(liveVideoUrls, state.photos, state.config);
+                    extraAssets.push({
+                        type: 'video',
+                        label: 'Video',
+                        filename: `${photoId}.mp4`,
+                        blob: videoBlob
+                    });
+                } catch (vidErr) {
+                    console.warn("Video generation failed:", vidErr);
+                }
+            }
+
+            if (extraAssets.length > 0) {
+                setUploadStatus('Uploading extra features...');
+                const tenantId = state.config?.tenant_id || 'default';
+                const sessionId = photoId;
+                await uploadMultipleToPredictablePaths(activeEventId, extraAssets, (s) => setUploadStatus(s), tenantId, sessionId);
             }
 
             localStorage.setItem('last_r2_upload', Date.now());
@@ -184,11 +235,11 @@ const Result = () => {
             }
 
             // Construction: Domain + /#/share?id=... (Using preview domain to bypass license checks on main app)
+            // Note: Since we use custom_id in proxy, result.photo_id will be our custom filename base
             const shareUrl = `https://preview.pixenzebooth.com/#/share?id=${result.photo_id}`;
             setQrUrl(shareUrl);
-            console.log(`[Result] Generated Share URL: ${shareUrl}`);
             setShowQrModal(true);
-            showAlert("SUCCESS! Scan the QR code to download!", "success");
+            showAlert("SUCCESS! Scan the QR code to download all assets!", "success");
 
         } catch (err) {
             console.error('Share failed:', err);
@@ -356,7 +407,7 @@ const Result = () => {
                     {stripUrl ? (
                         <div className="relative shadow-inner bg-white overflow-hidden max-h-[50vh] md:max-h-[60vh]">
                             {/* Live Frame Assembly */}
-                            {(state.liveVideos && (() => {
+                            {(state.liveVideos && state.liveVideos.some(v => v) && (() => {
                                 const lc = state.config?.layout_config;
                                 const slots = !lc ? [] : Array.isArray(lc) ? lc : (lc.a || []);
                                 return slots.length > 0 && state.config.frameImage;
@@ -375,11 +426,15 @@ const Result = () => {
                                                     height: `${slot.height}%`,
                                                 }}
                                             >
-                                                {state.liveVideos[i] ? (
+                                                {state.liveVideos[i] && liveVideoUrls[i] ? (
                                                     state.config?.is_lut ? (
                                                         <div className="w-full h-full relative">
                                                             <video
-                                                                ref={el => hiddenVideosRef.current[i] = el}
+                                                                ref={el => {
+                                                                    if (el && !mountedVideos[i]) {
+                                                                        setMountedVideos(prev => ({ ...prev, [i]: el }));
+                                                                    }
+                                                                }}
                                                                 src={liveVideoUrls[i]}
                                                                 autoPlay
                                                                 loop
@@ -388,7 +443,7 @@ const Result = () => {
                                                                 className="hidden"
                                                             />
                                                             <FilterCanvas
-                                                                videoElement={hiddenVideosRef.current[i]}
+                                                                videoElement={mountedVideos[i]}
                                                                 lutUrl={state.config.lutUrl}
                                                                 isMirrored={state.config?.isMirrored !== false}
                                                             />

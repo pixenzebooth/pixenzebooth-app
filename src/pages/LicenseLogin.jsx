@@ -161,7 +161,7 @@ const LicenseLogin = () => {
 
                     {/* Footer */}
                     <p className="text-white/30 font-mono text-[10px] text-center mt-6 tracking-widest">
-                        GASKENN PHOTOBOOTH • LICENSED SOFTWARE
+                        PIXENZEBOOTH • LICENSED SOFTWARE
                     </p>
                 </div>
             </motion.div>

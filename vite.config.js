@@ -268,7 +268,7 @@ function localApiPlugin() {
           req.on('data', chunk => { body += chunk; });
           req.on('end', async () => {
             try {
-              const { event_id, filename, content_type } = JSON.parse(body);
+              const { event_id, filename, content_type, tenant_id, session_id, tier, category } = JSON.parse(body);
               const supabaseUrl = env.VITE_SUPABASE_URL || env.SUPABASE_URL;
               const supabaseServiceKey = env.SUPABASE_SERVICE_ROLE_KEY;
               const authHeader = req.headers.authorization;
@@ -276,9 +276,18 @@ function localApiPlugin() {
               if (!authHeader) throw new Error('Unauthorized');
               
               const photoId = crypto.randomUUID();
-              const ext = filename.includes('.') ? filename.split('.').pop() : 'jpg';
-              // Path: photos/temp/{event_id}/{photo_id}.ext (simplified for dev)
-              const filePath = `photos/temp/${event_id}/${photoId}.${ext}`;
+              // Use the provided filename as the base if available to allow predictable naming for related assets
+              const ext = filename ? filename.split('.').pop() : 'jpg';
+              // Use session_id as the folder name if provided, otherwise use the photo's base name
+              const sessionIdStr = session_id || (filename ? filename.split('.').slice(0, -1).join('.') : photoId);
+              const tenantStr = tenant_id || 'default';
+              const eventStr = event_id || 'general';
+              const tierStr = tier || 'cold'; // Default to cold for safety
+              const categoryStr = category || 'gallery'; // Suggestion 5: Functional categories
+              
+              // ORGANIZED PATH STRUCTURE (Suggestion 4 & 5):
+              // {category} / {tier} / {tenant} / {event} / {session} / {file}
+              const filePath = `${categoryStr}/${tierStr}/${tenantStr}/${eventStr}/${sessionIdStr}/${filename || `${photoId}.jpg`}`;
 
               // R2 check
               const r2AccessKey = env.R2_ACCESS_KEY_ID || env.VITE_R2_ACCESS_KEY_ID;
@@ -551,6 +560,7 @@ export default defineConfig({
   },
   // Optimize dependencies
   optimizeDeps: {
+    entries: ['index.html'],
     include: ['react', 'react-dom', 'react-router-dom'],
   },
 })

@@ -78,12 +78,36 @@ const Preview = () => {
         }))
     ];
 
-    if (!state?.photos || !state?.config) {
-        useEffect(() => { 
-            console.warn("Preview accessed without photos or config. Redirecting...");
-            navigate('/'); 
-        }, [state, navigate]);
-        return null;
+    const [hasMounted, setHasMounted] = useState(false);
+    
+    useEffect(() => {
+        setHasMounted(true);
+    }, []);
+
+    // Redirect if direct access without state (with a small grace period for mount)
+    useEffect(() => {
+        if (hasMounted && (!state?.photos || !state?.config)) {
+            const timer = setTimeout(() => {
+                if (!state?.photos || !state?.config) {
+                    console.warn("[Preview] State still missing after mount. Redirecting...");
+                    navigate('/');
+                }
+            }, 500);
+            return () => clearTimeout(timer);
+        }
+    }, [hasMounted, state, navigate]);
+
+    if (!state?.photos || !state?.config || !hasMounted) {
+        return (
+            <div className="min-h-screen flex items-center justify-center bg-white">
+                <div className="flex flex-col items-center gap-4">
+                    <div className="w-16 h-16 border-4 border-black border-t-game-primary rounded-full animate-spin"></div>
+                    <p className="font-titan text-game-primary animate-pulse uppercase tracking-widest">
+                        Initializing Session...
+                    </p>
+                </div>
+            </div>
+        );
     }
 
     const handleConfirm = () => {

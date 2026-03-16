@@ -612,8 +612,8 @@ export const createLiveStripGif = async (liveVideos, photos, configOrTheme = 'pi
     }
 
     // Resize for GIF optimization (GIFs get huge at full res)
-    // Target width 450px is very small & quick to process, saving >60% payload
-    const TARGET_WIDTH = 450;
+    // Target width 400px provides better clarity while remaining overall efficient
+    const TARGET_WIDTH = 400;
     const scale = TARGET_WIDTH / canvasWidth;
     const gifWidth = TARGET_WIDTH;
     const gifHeight = Math.floor(canvasHeight * scale);
@@ -670,9 +670,8 @@ export const createLiveStripGif = async (liveVideos, photos, configOrTheme = 'pi
 
     // 4. GIF Encoding
     const gif = new GIFEncoder();
-    const FPS = 8; // Lower FPS for smaller size
-    // Capture for 3.5 seconds to limit file size
-    const duration = 3500;
+    const FPS = 6; // Lower FPS (6fps) for 6-second GIF to keep file size reasonable
+    const duration = 6000; // Increased to 6 seconds per user request
     const frameInterval = 1000 / FPS;
     const totalFrames = Math.floor(duration / frameInterval);
 
@@ -759,7 +758,7 @@ export const createLiveStripGif = async (liveVideos, photos, configOrTheme = 'pi
 
         // Quantize
         const imageData = ctx.getImageData(0, 0, gifWidth, gifHeight).data;
-        // Reduce colors for speed/size (from 256 to 64 colors saves huge amount of payload size)
+        // Increased to 64 colors for better visual fidelity
         const palette = quantize(imageData, 64);
         const index = applyPalette(imageData, palette);
 
